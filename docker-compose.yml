@@ -6,6 +6,8 @@ networks:
 
 volumes:
   redpanda-0: null
+  postgres-data: null
+  minio-data: null
 
 services:
   redpanda-0:
@@ -64,5 +66,61 @@ services:
       - 8080:8080
     depends_on:
       - redpanda-0
+    networks:
+      - redpanda_network
+
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    environment:
+      POSTGRES_USER: pipeline
+      POSTGRES_PASSWORD: pipeline123
+      POSTGRES_DB: ecommerce
+    ports:
+      - 5432:5432
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - redpanda_network
+
+  minio:
+    image: minio/minio
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    ports:
+      - 9000:9000
+      - 9001:9001
+    volumes:
+      - minio-data:/data
+    networks:
+      - redpanda_network
+
+  createbuckets:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until (/usr/bin/mc alias set local http://minio:9000 minioadmin minioadmin123) do echo 'waiting for minio...'; sleep 2; done;
+      /usr/bin/mc mb --ignore-existing local/ecommerce-bronze;
+      echo 'bucket ready: ecommerce-bronze';
+      exit 0;
+      "
+    networks:
+      - redpanda_network
+
+  spark:
+    image: apache/spark:3.5.1-python3
+    container_name: spark
+    entrypoint: ["sleep", "infinity"]
+    volumes:
+      - ./spark_jobs:/opt/spark/jobs
+    depends_on:
+      - redpanda-0
+      - postgres
+      - minio
     networks:
       - redpanda_network
